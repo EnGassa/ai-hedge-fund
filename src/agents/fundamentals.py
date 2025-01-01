@@ -42,75 +42,86 @@ def fundamentals_agent(state: AgentState):
     signals.append('bullish' if growth_score >= 2 else 'bearish' if growth_score == 0 else 'neutral')
     reasoning["growth_signal"] = {
         "signal": signals[1],
-        "details": f"Revenue Growth: {metrics['revenue_growth']:.2%}, Earnings Growth: {metrics['earnings_growth']:.2%}"
+        "details": f"Revenue Growth: {metrics['revenue_growth']:.2%}, Earnings Growth: {metrics['earnings_growth']:.2%}, Book Value Growth: {metrics['book_value_growth']:.2%}"
     }
     
-    # 3. Financial Health
+    # 3. Financial Health Analysis
     health_score = 0
+    if metrics["debt_to_equity"] < 1.0:  # Conservative debt level
+        health_score += 1
     if metrics["current_ratio"] > 1.5:  # Strong liquidity
         health_score += 1
-    if metrics["debt_to_equity"] < 0.5:  # Conservative debt levels
-        health_score += 1
-    if metrics["free_cash_flow_per_share"] > metrics["earnings_per_share"] * 0.8:  # Strong FCF conversion
+    if metrics["quick_ratio"] > 1.0:  # Strong quick ratio
         health_score += 1
         
     signals.append('bullish' if health_score >= 2 else 'bearish' if health_score == 0 else 'neutral')
-    reasoning["financial_health_signal"] = {
+    reasoning["health_signal"] = {
         "signal": signals[2],
-        "details": f"Current Ratio: {metrics['current_ratio']:.2f}, D/E: {metrics['debt_to_equity']:.2f}"
+        "details": f"D/E: {metrics['debt_to_equity']:.2f}, Current Ratio: {metrics['current_ratio']:.2f}, Quick Ratio: {metrics['quick_ratio']:.2f}"
     }
     
-    # 4. Price to X ratios
-    pe_ratio = metrics["price_to_earnings_ratio"]
-    pb_ratio = metrics["price_to_book_ratio"]
-    ps_ratio = metrics["price_to_sales_ratio"]
-    
-    price_ratio_score = 0
-    if pe_ratio < 25:  # Reasonable P/E ratio
-        price_ratio_score += 1
-    if pb_ratio < 3:  # Reasonable P/B ratio
-        price_ratio_score += 1
-    if ps_ratio < 5:  # Reasonable P/S ratio
-        price_ratio_score += 1
+    # 4. Cash Flow Analysis
+    cash_flow_score = 0
+    if metrics["free_cash_flow_per_share"] > metrics["earnings_per_share"] * 0.8:  # Strong FCF conversion
+        cash_flow_score += 1
+    if metrics["free_cash_flow_per_share"] > 0:  # Positive FCF
+        cash_flow_score += 1
         
-    signals.append('bullish' if price_ratio_score >= 2 else 'bearish' if price_ratio_score == 0 else 'neutral')
-    reasoning["price_ratios_signal"] = {
+    signals.append('bullish' if cash_flow_score == 2 else 'bearish' if cash_flow_score == 0 else 'neutral')
+    reasoning["cash_flow_signal"] = {
         "signal": signals[3],
+        "details": f"FCF/Share: ${metrics['free_cash_flow_per_share']:.2f}, EPS: ${metrics['earnings_per_share']:.2f}"
+    }
+    
+    # 5. Valuation Analysis
+    valuation_score = 0
+    pe_ratio = metrics["price_to_earnings"]
+    pb_ratio = metrics["price_to_book"]
+    ps_ratio = metrics["price_to_sales"]
+    
+    # Industry-specific thresholds (simplified)
+    if pe_ratio > 0 and pe_ratio < 30:  # Reasonable P/E
+        valuation_score += 1
+    if pb_ratio < 5:  # Reasonable P/B
+        valuation_score += 1
+    if ps_ratio < 10:  # Reasonable P/S
+        valuation_score += 1
+        
+    signals.append('bullish' if valuation_score >= 2 else 'bearish' if valuation_score == 0 else 'neutral')
+    reasoning["valuation_signal"] = {
+        "signal": signals[4],
         "details": f"P/E: {pe_ratio:.2f}, P/B: {pb_ratio:.2f}, P/S: {ps_ratio:.2f}"
     }
     
-    # Determine overall signal
-    bullish_signals = signals.count('bullish')
-    bearish_signals = signals.count('bearish')
+    # Aggregate signals
+    bullish_count = len([s for s in signals if s == 'bullish'])
+    bearish_count = len([s for s in signals if s == 'bearish'])
     
-    if bullish_signals > bearish_signals:
-        overall_signal = 'bullish'
-    elif bearish_signals > bullish_signals:
-        overall_signal = 'bearish'
+    # Final signal
+    if bullish_count > bearish_count and bullish_count >= 3:
+        final_signal = 'bullish'
+        confidence = min(1.0, (bullish_count - bearish_count) / len(signals))
+    elif bearish_count > bullish_count and bearish_count >= 3:
+        final_signal = 'bearish'
+        confidence = min(1.0, (bearish_count - bullish_count) / len(signals))
     else:
-        overall_signal = 'neutral'
+        final_signal = 'neutral'
+        confidence = 0.5
     
-    # Calculate confidence level
-    total_signals = len(signals)
-    confidence = max(bullish_signals, bearish_signals) / total_signals
-    
-    message_content = {
-        "signal": overall_signal,
-        "confidence": f"{round(confidence * 100)}%",
-        "reasoning": reasoning
-    }
-    
-    # Create the fundamental analysis message
-    message = HumanMessage(
-        content=json.dumps(message_content),
-        name="fundamentals_agent",
-    )
-    
-    # Print the reasoning if the flag is set
     if show_reasoning:
-        show_agent_reasoning(message_content, "Fundamental Analysis Agent")
+        print("\n==========    Fundamentals Agent    ==========")
+        print(json.dumps({
+            "signal": final_signal,
+            "confidence": f"{confidence*100:.0f}%",
+            "reasoning": reasoning
+        }, indent=2))
+        print("================================================\n")
     
     return {
-        "messages": [message],
-        "data": data,
+        "messages": state["messages"],
+        "data": {
+            **data,
+            "fundamentals_signal": final_signal,
+            "fundamentals_confidence": confidence
+        }
     }

@@ -1,59 +1,76 @@
-
+import json
+import pandas as pd
+import numpy as np
 from langchain_core.messages import HumanMessage
 
 from agents.state import AgentState, show_agent_reasoning
 
-import pandas as pd
-
-import numpy as np
-
-import json
-
-##### Sentiment Agent #####
 def sentiment_agent(state: AgentState):
     """Analyzes market sentiment and generates trading signals."""
+    show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
     insider_trades = data["insider_trades"]
-    show_reasoning = state["metadata"]["show_reasoning"]
-
-    # Loop through the insider trades, if transaction_shares is negative, then it is a sell, which is bearish, if positive, then it is a buy, which is bullish
-
-    # Get the signals from the insider trades
-    transaction_shares = pd.Series([t['transaction_shares'] for t in insider_trades]).dropna()
-    bearish_condition = transaction_shares < 0
-    signals = np.where(bearish_condition, "bearish", "bullish").tolist()
-
-    # Determine overall signal
-    bullish_signals = signals.count("bullish")
-    bearish_signals = signals.count("bearish")
-    if bullish_signals > bearish_signals:
-        overall_signal = "bullish"
-    elif bearish_signals > bullish_signals:
-        overall_signal = "bearish"
+    
+    # Initialize sentiment metrics
+    sentiment_metrics = {}
+    
+    # 1. Insider Trading Analysis
+    if insider_trades:
+        # Convert transaction values to numeric
+        transaction_shares = pd.Series([t['shares'] for t in insider_trades]).dropna()
+        transaction_values = pd.Series([t['value'] for t in insider_trades]).dropna()
+        
+        # Calculate metrics
+        sentiment_metrics["insider_metrics"] = {
+            "total_transactions": len(insider_trades),
+            "avg_transaction_size": float(transaction_shares.mean()) if not transaction_shares.empty else 0,
+            "total_value": float(transaction_values.sum()) if not transaction_values.empty else 0,
+            "buy_ratio": len([t for t in insider_trades if t["transaction_type"] == "buy"]) / len(insider_trades) if insider_trades else 0
+        }
+        
+        # Determine insider sentiment signal
+        buy_ratio = sentiment_metrics["insider_metrics"]["buy_ratio"]
+        avg_size = sentiment_metrics["insider_metrics"]["avg_transaction_size"]
+        total_value = sentiment_metrics["insider_metrics"]["total_value"]
+        
+        if buy_ratio > 0.7 and total_value > 1000000:  # Strong buying
+            insider_signal = "bullish"
+            insider_confidence = min(1.0, buy_ratio)
+        elif buy_ratio < 0.3 and total_value > 1000000:  # Strong selling
+            insider_signal = "bearish"
+            insider_confidence = min(1.0, 1 - buy_ratio)
+        else:
+            insider_signal = "neutral"
+            insider_confidence = 0.5
     else:
-        overall_signal = "neutral"
-
-    # Calculate confidence level based on the proportion of indicators agreeing
-    total_signals = len(signals)
-    confidence = max(bullish_signals, bearish_signals) / total_signals
-
-    message_content = {
-        "signal": overall_signal,
-        "confidence": f"{round(confidence * 100)}%",
-        "reasoning": f"Bullish signals: {bullish_signals}, Bearish signals: {bearish_signals}"
-    }
-
-    # Print the reasoning if the flag is set
+        # No insider trading data
+        sentiment_metrics["insider_metrics"] = {
+            "total_transactions": 0,
+            "avg_transaction_size": 0,
+            "total_value": 0,
+            "buy_ratio": 0
+        }
+        insider_signal = "neutral"
+        insider_confidence = 0.5
+    
+    # Format the final output
+    final_signal = insider_signal  # For now, just use insider signal
+    final_confidence = insider_confidence
+    
     if show_reasoning:
-        show_agent_reasoning(message_content, "Sentiment Analysis Agent")
-
-    # Create the sentiment message
-    message = HumanMessage(
-        content=json.dumps(message_content),
-        name="sentiment_agent",
-    )
-
+        print("\n==========    Sentiment Agent     ==========")
+        print(json.dumps({
+            "signal": final_signal,
+            "confidence": f"{final_confidence*100:.0f}%",
+            "metrics": sentiment_metrics
+        }, indent=2))
+        print("================================================\n")
+    
     return {
-        "messages": [message],
-        "data": data,
+        "messages": state["messages"],
+        "data": {
+            **data,
+            "sentiment_signal": final_signal,
+            "sentiment_confidence": final_confidence
+        }
     }

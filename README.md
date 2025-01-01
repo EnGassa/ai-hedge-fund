@@ -61,7 +61,6 @@ poetry install
 cp .env.example .env
 
 export OPENAI_API_KEY='your-api-key-here' # Get a key from https://platform.openai.com/
-export FINANCIAL_DATASETS_API_KEY='your-api-key-here' # Get a key from https://financialdatasets.ai/
 ```
 
 ## Usage
